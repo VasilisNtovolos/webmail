@@ -100,6 +100,73 @@ describe('bulk archive ownership and reconciliation', () => {
     expect(refresh).toHaveBeenCalledOnce();
   });
 
+  it('skips prohibited owner Archive creation while reconciling the valid primary group', async () => {
+    folders.shared = [mailbox('shared', 'inbox', true)];
+    const getAccountCapability = vi.fn((_capability: string, owner?: string) => ({
+      mayCreateTopLevelMailbox: owner !== 'shared',
+    }));
+    Object.assign(client, { getAccountCapability });
+    const failed = useEmailStore.getState().emails[1];
+
+    await expect(useEmailStore.getState().batchArchive(client)).rejects.toBeInstanceOf(ArchiveMailboxNotFoundError);
+
+    expect(getAccountCapability).toHaveBeenCalledWith('urn:ietf:params:jmap:mail', 'shared');
+    expect(client.createMailbox).not.toHaveBeenCalled();
+    expect(client.batchArchiveEmails).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(client.batchArchiveEmails).mock.calls[0][4]).toBe('primary');
+    expect(useEmailStore.getState().emails).toEqual([failed]);
+    expect([...useEmailStore.getState().selectedEmailIds]).toEqual(['shared-email']);
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it.each(['single', 'year', 'month'] as const)('uses an existing Archive in %s mode despite prohibited top-level creation', async mode => {
+    Object.assign(client, { getAccountCapability: vi.fn(() => ({ mayCreateTopLevelMailbox: false })) });
+    folders.shared[1].myRights.mayCreateChild = true;
+    useSettingsStore.setState({ archiveMode: mode });
+
+    await useEmailStore.getState().batchArchive(client);
+
+    expect(client.createMailbox).not.toHaveBeenCalled();
+    expect(client.batchArchiveEmails).toHaveBeenCalledWith(
+      [{ id: 'shared-email', receivedAt: expect.any(String) }], 'archive', mode,
+      expect.arrayContaining([expect.objectContaining({ id: 'archive', myRights: expect.objectContaining({ mayCreateChild: true }) })]), 'shared',
+    );
+    expect(useEmailStore.getState().selectedEmailIds.size).toBe(0);
+  });
+
+  it('uses the reaching client’s capability for equal owner IDs on different logins', async () => {
+    const otherFolders = { primary: [mailbox('primary', 'inbox')] };
+    const otherClient = makeClient(otherFolders);
+    const deniedCapability = vi.fn(() => ({ mayCreateTopLevelMailbox: false }));
+    const allowedCapability = vi.fn(() => ({ mayCreateTopLevelMailbox: true }));
+    Object.assign(client, { getAccountCapability: deniedCapability });
+    Object.assign(otherClient, { getAccountCapability: allowedCapability });
+    folders.primary = [mailbox('primary', 'inbox')];
+    vi.mocked(otherClient.createMailbox).mockImplementation(async () => {
+      const archive = { ...mailbox('primary', 'archive'), id: 'other-archive' };
+      otherFolders.primary.push(archive);
+      return archive;
+    });
+    useAuthStore.setState({
+      getClientForAccount: (id: string) => (id === 'login-a' ? client : id === 'login-b' ? otherClient : undefined) as never,
+    });
+    const failed = email('failed-email', 'primary');
+    useEmailStore.setState({
+      emails: [failed, email('other-email', 'primary', 'login-b')], selectedEmailIds: new Set(['failed-email', 'other-email']),
+    });
+
+    await expect(useEmailStore.getState().batchArchive(client)).rejects.toBeInstanceOf(ArchiveMailboxNotFoundError);
+
+    expect(deniedCapability).toHaveBeenCalledWith('urn:ietf:params:jmap:mail', 'primary');
+    expect(allowedCapability).toHaveBeenCalledWith('urn:ietf:params:jmap:mail', 'primary');
+    expect(client.createMailbox).not.toHaveBeenCalled();
+    expect(client.batchArchiveEmails).not.toHaveBeenCalled();
+    expect(otherClient.createMailbox).toHaveBeenCalledWith('Archive', undefined, 'primary', { role: 'archive' });
+    expect(vi.mocked(otherClient.batchArchiveEmails).mock.calls[0][1]).toBe('other-archive');
+    expect(useEmailStore.getState().emails).toEqual([failed]);
+    expect([...useEmailStore.getState().selectedEmailIds]).toEqual(['failed-email']);
+  });
+
   it.each(['single', 'year', 'month'] as const)('creates each missing owner’s Archive independently in %s mode', async mode => {
     folders.primary = [mailbox('primary', 'inbox')];
     folders.shared = [mailbox('shared', 'inbox', true)];
