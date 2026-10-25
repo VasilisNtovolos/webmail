@@ -135,7 +135,7 @@ describe('non-unified shared-folder batch action routing', () => {
   it('batchMoveToMailbox moves shared emails within the owner account', async () => {
     await useEmailStore.getState().batchMoveToMailbox(activeClient, 'owner-x:x-archive');
 
-    expect(activeClient.batchMoveEmails).toHaveBeenCalledWith(['e1', 'e2'], 'x-archive', 'owner-x');
+    expect(activeClient.batchMoveEmails).toHaveBeenCalledWith(['e1', 'e2'], 'x-archive', 'owner-x', undefined, { requireConfirmation: true });
   });
 
   it('batchMarkAsRead marks shared emails read on the owner account', async () => {

@@ -1,3 +1,4 @@
+import { MoveEmailsError, type MoveEmailRejection } from "@/lib/jmap/move-error";
 import type { IJMAPClient, KeywordDiscoveryResult, KeywordMigration } from '@/lib/jmap/client-interface';
 import type { AccountInfo, Email, Mailbox, StateChange, AccountStates, Thread, Identity, EmailAddress, ContactCard, AddressBook, VacationResponse, Calendar, CalendarEvent, CalendarEventFilter, CalendarTask, FileNode, ScheduledEmail, SendEmailResult, SharedAccount } from '@/lib/jmap/types';
 import type { SieveScript, SieveCapabilities } from '@/lib/jmap/sieve-types';
@@ -593,15 +594,21 @@ export class DemoJMAPClient implements IJMAPClient {
     this.recalcMailboxCounts();
   }
 
-  async batchMoveEmails(emailIds: string[], toMailboxId: string, _accountId?: string, markAsRead?: boolean): Promise<void> {
+  async batchMoveEmails(emailIds: string[], toMailboxId: string, _accountId?: string, markAsRead?: boolean, options?: { requireConfirmation?: boolean }): Promise<void> {
+    const confirmedIds: string[] = [];
+    const rejections: Record<string, MoveEmailRejection> = Object.create(null);
     for (const id of emailIds) {
       const email = this.data.emails.find(e => e.id === id);
       if (email) {
         email.mailboxIds = { [toMailboxId]: true };
         if (markAsRead) email.keywords.$seen = true;
-      }
+        confirmedIds.push(id);
+      } else rejections[id] = { type: 'notFound' };
     }
     this.recalcMailboxCounts();
+    if (options?.requireConfirmation && Object.keys(rejections).length) {
+      throw new MoveEmailsError('Failed to move emails: notFound', confirmedIds, rejections, [], [], { cause: Object.values(rejections)[0] });
+    }
   }
 
   async batchArchiveEmails(

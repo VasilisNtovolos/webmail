@@ -91,6 +91,10 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as { methodCalls: Array<[string, SetArgs, string]> };
     const responses = body.methodCalls.map(([method, args, tag]) => {
+      if (method === 'Mailbox/get') return [method, { accountId: args.accountId, list: [
+        mailbox('inbox', args.accountId, args.accountId !== 'owner'),
+        mailbox('dest', args.accountId, args.accountId !== 'owner'),
+      ] }, tag];
       expect(method).toBe('Email/set');
       const auth = new Headers(init?.headers).get('Authorization');
       const login = new URL(String(url)).hostname.split('.')[0];
@@ -172,7 +176,7 @@ describe('bulk Move authenticated-client routing', () => {
     select([unstamped('p'), unstamped('q')]);
     await useEmailStore.getState().batchMoveToMailbox(a, 'dest');
     expectRequests([['a', 'owner', ['p', 'q']]]);
-    expect(refresh).toHaveBeenCalledWith(a);
+    expect(refresh).toHaveBeenCalledWith(a, { isCurrentView: expect.any(Function), throwOnError: true, preserveThreadCache: true });
   });
 
   it.each([false, true])('preserves direct shared-folder routing (viewing account=%s)', async viewing => {

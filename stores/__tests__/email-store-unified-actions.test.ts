@@ -499,7 +499,7 @@ describe('unified-view batch actions with two logins that share account ids', ()
   it('moves a selection in place only in the folder\'s own login and account (0.16.23 and 1.0 logins)', async () => {
     await useEmailStore.getState().batchMoveToMailbox(client016, 'f');
 
-    expect(callsOf(client016.batchMoveEmails)).toEqual([[['m016'], 'f', 'e']]);
+    expect(callsOf(client016.batchMoveEmails)).toEqual([[['m016'], 'f', 'e', undefined, { requireConfirmation: true }]]);
     expect(callsOf(client10.batchMoveEmails)).toEqual([]);
     // The others are moved across accounts, each from its own login and account.
     expect(crossMoves()).toEqual([
@@ -516,7 +516,7 @@ describe('unified-view batch actions with two logins that share account ids', ()
 
     await useEmailStore.getState().batchMoveToMailbox(client016, 'c:g');
 
-    expect(callsOf(client016.batchMoveEmails)).toEqual([[['t016'], 'g', 'c']]);
+    expect(callsOf(client016.batchMoveEmails)).toEqual([[['t016'], 'g', 'c', undefined, { requireConfirmation: true }]]);
     expect(callsOf(client10.batchMoveEmails)).toEqual([]);
     expect(crossMoves()).toEqual([
       [new Map([['userb@v016', ['m016']]]), 'userb@v016', 'g', 'c', 'e'],
@@ -849,7 +849,7 @@ describe('lists that mix accounts, without the unified views\' cache and after b
 
     await useEmailStore.getState().batchMoveToMailbox(client016, 'f');
 
-    expect(callsOf(client016.batchMoveEmails)).toEqual([[['m016'], 'f', 'd']]);
+    expect(callsOf(client016.batchMoveEmails)).toEqual([[['m016'], 'f', 'd', undefined, { requireConfirmation: true }]]);
     expect(callsOf(client10.batchMoveEmails)).toEqual([]);
     expect(callsOf(useEmailStore.getState().crossAccountMoveEmails)).toEqual([
       [new Map([['usera@v10', ['m10']]]), 'usera@v016', 'f', undefined, 'd'],

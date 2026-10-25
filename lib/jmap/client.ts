@@ -1,4 +1,5 @@
 import { IncompleteDeleteError } from "./delete-error";
+import { MoveEmailsError, type MoveEmailRejection } from "./move-error";
 import { ArchiveEmailsError } from "./archive-error";
 import { generateUUID } from '@/lib/utils';
 import type { Attachment, Email, Mailbox, MailboxRights, StateChange, AccountStates, CollectionChanges, ShareNotification, BusyPeriod, CalendarParticipantIdentity, CalendarEventNotification, Thread, Identity, EmailAddress, ContactCard, AddressBook, AddressBookRights, VacationResponse, Calendar, CalendarComponentType, CalendarRights, CalendarEvent, CalendarEventFilter, CalendarTask, CreateCalendarOptions, FileNode, FileNodeFilter, FileNodeRights, Principal, PrincipalAvailability, PrincipalListing, PushSubscription, EmailPushConfig, DeliveryStatus, EmailSubmission, RejectedRecipient, ScheduledEmail, SendEmailResult, SharedAccount } from "./types";
@@ -3359,9 +3360,8 @@ export class JMAPClient implements IJMAPClient {
     }
   }
 
-  async batchMoveEmails(emailIds: string[], toMailboxId: string, accountId?: string, markAsRead?: boolean): Promise<void> {
+  async batchMoveEmails(emailIds: string[], toMailboxId: string, accountId?: string, markAsRead?: boolean, options?: { requireConfirmation?: boolean }): Promise<void> {
     if (emailIds.length === 0) return;
-
     const buildPatch = () => {
       const patch: Record<string, unknown> = { mailboxIds: { [toMailboxId]: true } };
       if (markAsRead) patch["keywords/$seen"] = true;
@@ -3370,21 +3370,63 @@ export class JMAPClient implements IJMAPClient {
     // A refused batch doesn't stop the others, and the error names every
     // message left where it was: the batches after one that failed used to
     // stay unsent while a caller counted them as moved.
-    const batches = batched(emailIds, this.getMaxObjectsInSet());
+    const strict = options?.requireConfirmation;
+    const ids = strict ? [...new Set(emailIds)] : emailIds;
+    const batches = batched(ids, this.getMaxObjectsInSet());
     const responses: JMAPResponse[] = [];
     let requestError: unknown;
+    const confirmedIds: string[] = [];
+    const rejections: Record<string, MoveEmailRejection> = Object.create(null);
+    let attempted = 0;
     for (const batch of batches) {
+      attempted += batch.length;
       const updates = Object.fromEntries(batch.map(id => [id, buildPatch()]));
+      let response: JMAPResponse;
       try {
-        responses.push(await this.request([
+        response = await this.request([
           ["Email/set", { accountId: accountId || this.accountId, update: updates }, "0"],
-        ]));
-      } catch (error) {
-        requestError = error;
-        break;
+        ]);
+      } catch (cause) {
+        if (!strict) { requestError = cause; break; }
+        throw new MoveEmailsError(
+          cause instanceof Error ? cause.message : 'Failed to move emails',
+          confirmedIds, rejections, batch, ids.slice(attempted), { cause },
+        );
+      }
+
+      if (!strict) { responses.push(response); continue; }
+      const entry = response?.methodResponses?.find(entry => entry[2] === '0');
+      const [name, result] = entry ?? [];
+      const unknownIds: string[] = [];
+      const notUpdated = result?.notUpdated ?? {};
+      const updated = result?.updated ?? {};
+      for (const id of batch) {
+        if (name === 'error') rejections[id] = result ?? { type: 'unknownError' };
+        else if (name === 'Email/set' && Object.hasOwn(notUpdated, id)) {
+          rejections[id] = notUpdated[id];
+        } else if (name === 'Email/set' && Object.hasOwn(updated, id)) confirmedIds.push(id);
+        else unknownIds.push(id);
+      }
+      const refusal = Object.values(rejections)[0];
+      if (name === 'error' || unknownIds.length > 0) {
+        const cause = refusal ?? new Error('Move update was not confirmed');
+        throw new MoveEmailsError(
+          `Failed to move emails: ${refusal?.description || refusal?.type || 'update was not confirmed'}`,
+          confirmedIds, rejections, unknownIds, ids.slice(attempted), { cause },
+        );
       }
     }
-    this.assertEmailSetBatchesSucceeded(responses, batches, 'move emails', requestError);
+    if (!strict) {
+      this.assertEmailSetBatchesSucceeded(responses, batches, 'move emails', requestError);
+      return;
+    }
+    const refusal = Object.values(rejections)[0];
+    if (refusal) {
+      throw new MoveEmailsError(
+        `Failed to move emails: ${refusal.description || refusal.type || 'update was refused'}`,
+        confirmedIds, rejections, [], [], { cause: refusal },
+      );
+    }
   }
 
   async batchArchiveEmails(

@@ -345,7 +345,14 @@ export interface IJMAPClient {
   moveToTrash(emailId: string, trashMailboxId: string, accountId?: string, markAsRead?: boolean): Promise<void>;
   /** Resolves only when every ID is destroyed; IncompleteDeleteError carries partial confirmations. */
   batchDeleteEmails(emailIds: string[], accountId?: string): Promise<void>;
-  batchMoveEmails(emailIds: string[], toMailboxId: string, accountId?: string, markAsRead?: boolean): Promise<void>;
+  /**
+   * Default: the base failure-only contract. Selected bulk Move opts in with
+   * requireConfirmation: every ID must appear in updated (null counts).
+   * MoveEmailsError retains confirmations, refusals, unknown and unattempted
+   * IDs across chunks, plus JMAP metadata and cause, scoped to this client/owner.
+   * Unknown outcomes may have been applied; only explicit refusals are definite.
+   */
+  batchMoveEmails(emailIds: string[], toMailboxId: string, accountId?: string, markAsRead?: boolean, options?: { requireConfirmation?: boolean }): Promise<void>;
   batchArchiveEmails(
     emails: Array<{ id: string; receivedAt: string }>,
     archiveMailboxId: string,

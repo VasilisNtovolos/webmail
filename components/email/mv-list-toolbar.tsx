@@ -232,7 +232,7 @@ export function MvListToolbar({
   // rejected promise or a store error turns into an error toast instead of
   // an unhandled rejection with nothing on screen.
   const run = async (
-    action: () => Promise<void>,
+    action: () => Promise<boolean | void>,
     messages?: Parameters<typeof runBatchEmailAction>[1],
   ) => {
     if (!client || isProcessing) return;
@@ -361,7 +361,7 @@ export function MvListToolbar({
     setMoveOpen(false);
     const count = selectionCount;
     void run(async () => {
-      if (client) await batchMoveToMailbox(client, mailboxId);
+      return client ? batchMoveToMailbox(client, mailboxId) : false;
     }, {
       success: tNotifications("emails_moved", { count }),
       error: tNotifications("move_failed"),
